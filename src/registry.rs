@@ -18,6 +18,8 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::System::SystemServices::{DELETE, WRITE_DAC, WRITE_OWNER};
 
+use crate::log_panic;
+use crate::extensions::ExpectExtension;
 use crate::windows_utils::{OptionalWideString, WideString};
 
 
@@ -88,10 +90,10 @@ impl RegistryValue {
                 for (i, s) in ss.iter().enumerate() {
                     let s_ws: Vec<u16> = s.encode_wide().collect();
                     if s_ws.contains(&0x00) {
-                        panic!("string at index {} in a multi-string contains a NUL character", i);
+                        log_panic!("string at index {} in a multi-string contains a NUL character", i);
                     }
                     if s_ws.len() == 0 {
-                        panic!("string at index {} in a multi-string is empty", i);
+                        log_panic!("string at index {} in a multi-string is empty", i);
                     }
                     ws.extend(&s_ws);
                     ws.push(0x0000);
@@ -117,15 +119,15 @@ impl RegistryValue {
             REG_SZ => RegistryValue::String(bytes_to_os_string(bs)),
             REG_EXPAND_SZ => os_string_to_expand_value(bytes_to_os_string(bs)),
             REG_BINARY => RegistryValue::Binary(Vec::from(bs)),
-            REG_DWORD => RegistryValue::Dword(u32::from_le_bytes(bs.try_into().expect("DWORD value has incorrect length"))),
-            REG_DWORD_BIG_ENDIAN => RegistryValue::DwordBigEndian(u32::from_be_bytes(bs.try_into().expect("DWORD value has incorrect length"))),
+            REG_DWORD => RegistryValue::Dword(u32::from_le_bytes(bs.try_into().expect_log("DWORD value has incorrect length"))),
+            REG_DWORD_BIG_ENDIAN => RegistryValue::DwordBigEndian(u32::from_be_bytes(bs.try_into().expect_log("DWORD value has incorrect length"))),
             REG_LINK => RegistryValue::Link(bytes_to_os_string(bs)),
             REG_MULTI_SZ => RegistryValue::MultiString(bytes_to_multi_os_string(bs)),
             REG_RESOURCE_LIST => RegistryValue::ResourceList(Vec::from(bs)),
             REG_FULL_RESOURCE_DESCRIPTOR => RegistryValue::FullResourceDescriptor(Vec::from(bs)),
             REG_RESOURCE_REQUIREMENTS_LIST => Self::ResourceRequirementsList(Vec::from(bs)),
-            REG_QWORD => Self::Qword(u64::from_le_bytes(bs.try_into().expect("QWORD value has incorrect length"))),
-            _ => panic!("unknown registry value type 0x{:X}", reg_value_type.0),
+            REG_QWORD => Self::Qword(u64::from_le_bytes(bs.try_into().expect_log("QWORD value has incorrect length"))),
+            _ => log_panic!("unknown registry value type 0x{:X}", reg_value_type.0),
         }
     }
 }
@@ -280,7 +282,7 @@ fn os_str_to_bytes(os_str: &OsStr) -> Vec<u8> {
 
 fn bytes_to_os_string(bs: &[u8]) -> OsString {
     if bs.len() % 2 != 0 {
-        panic!("bytes length not divisible by 2");
+        log_panic!("bytes length not divisible by 2");
     }
 
     let mut ws = Vec::with_capacity(bs.len()/2);
@@ -302,7 +304,7 @@ fn bytes_to_os_string(bs: &[u8]) -> OsString {
 
 fn bytes_to_multi_os_string(bs: &[u8]) -> Vec<OsString> {
     if bs.len() % 2 != 0 {
-        panic!("bytes length not divisible by 2");
+        log_panic!("bytes length not divisible by 2");
     }
 
     let mut ws = Vec::with_capacity(bs.len()/2);
@@ -345,7 +347,7 @@ fn os_string_to_expand_value(os_string: OsString) -> RegistryValue {
         )
     };
     if new_length == 0 {
-        panic!("failed to get expanded environment string length: {}", Error::from_win32());
+        log_panic!("failed to get expanded environment string length: {}", Error::from_win32());
     }
     let new_length_usize: usize = new_length.try_into().unwrap();
 
@@ -357,7 +359,7 @@ fn os_string_to_expand_value(os_string: OsString) -> RegistryValue {
         )
     };
     if expanded_length == 0 {
-        panic!("failed to get expanded environment string: {}", Error::from_win32());
+        log_panic!("failed to get expanded environment string: {}", Error::from_win32());
     }
     let expanded_length_usize: usize = expanded_length.try_into().unwrap();
 

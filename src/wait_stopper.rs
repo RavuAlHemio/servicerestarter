@@ -2,6 +2,8 @@ use std::sync::{Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
+use crate::extensions::ExpectExtension;
+
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
@@ -31,19 +33,19 @@ impl WaitStopper {
 
     pub fn wait_until_stop_timeout(&self, timeout: Duration) -> StopResult {
         let guard = self.mutex.lock()
-            .expect("mutex is poisoned");
+            .expect_log("mutex is poisoned");
         if guard.wants_to_stop() {
             return *guard;
         }
         let (guard, _timeout_result) = self.cond_var.wait_timeout(guard, timeout)
-            .expect("mutex is poisoned");
+            .expect_log("mutex is poisoned");
         return *guard;
     }
 
     pub fn stop(&self) {
         {
             let mut guard = self.mutex.lock()
-                .expect("mutex is poisoned");
+                .expect_log("mutex is poisoned");
             *guard = StopResult::new_wants_to_stop();
         }
         self.cond_var.notify_all();

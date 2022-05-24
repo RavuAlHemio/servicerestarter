@@ -26,6 +26,7 @@ use windows::Win32::System::SystemServices::{
     DELETE, SERVICE_INTERACTIVE_PROCESS, WRITE_DAC, WRITE_OWNER,
 };
 
+use crate::extensions::ExpectExtension;
 use crate::windows_utils::{OptionalWideString, WideString};
 
 
@@ -186,7 +187,7 @@ impl ServiceHandle {
         }.as_bool();
         if succeeded {
             let service_status = service_status.dwCurrentState
-                .try_into().expect("unexpected service status value");
+                .try_into().expect_log("unexpected service status value");
             Ok(service_status)
         } else {
             Err(Error::from_win32())
