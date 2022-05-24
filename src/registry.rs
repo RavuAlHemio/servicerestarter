@@ -7,6 +7,7 @@ use bitflags::bitflags;
 use windows::core::Error;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, NO_ERROR};
 use windows::Win32::Storage::FileSystem::READ_CONTROL;
+use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS,
     KEY_CREATE_SUB_KEY, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_NOTIFY, KEY_SET_VALUE,
@@ -17,7 +18,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::System::SystemServices::{DELETE, WRITE_DAC, WRITE_OWNER};
 
-use crate::windows_utils::OptionalWideString;
+use crate::windows_utils::{OptionalWideString, WideString};
 
 
 bitflags! {
@@ -44,7 +45,7 @@ impl From<RegistryPermissions> for REG_SAM_FLAGS {
 pub enum RegistryValue {
     None(Vec<u8>),
     String(OsString),
-    ExpandString(OsString), // unexpanded!
+    ExpandString { unexpanded: OsString, expanded: OsString },
     Binary(Vec<u8>),
     Dword(u32),
     DwordBigEndian(u32),
@@ -60,7 +61,7 @@ impl RegistryValue {
         match self {
             Self::None(_) => REG_NONE,
             Self::String(_) => REG_SZ,
-            Self::ExpandString(_) => REG_EXPAND_SZ,
+            Self::ExpandString { unexpanded: _, expanded: _ } => REG_EXPAND_SZ,
             Self::Binary(_) => REG_BINARY,
             Self::Dword(_) => REG_DWORD,
             Self::DwordBigEndian(_) => REG_DWORD_BIG_ENDIAN,
@@ -77,7 +78,7 @@ impl RegistryValue {
         match self {
             Self::None(bs) => bs.clone(),
             Self::String(s) => os_str_to_bytes(s),
-            Self::ExpandString(s) => os_str_to_bytes(s),
+            Self::ExpandString { unexpanded, expanded: _ } => os_str_to_bytes(unexpanded),
             Self::Binary(bs) => bs.clone(),
             Self::Dword(dw) => Vec::from(dw.to_le_bytes()),
             Self::DwordBigEndian(dw) => Vec::from(dw.to_be_bytes()),
@@ -114,7 +115,7 @@ impl RegistryValue {
         match reg_value_type {
             REG_NONE => RegistryValue::None(Vec::from(bs)),
             REG_SZ => RegistryValue::String(bytes_to_os_string(bs)),
-            REG_EXPAND_SZ => RegistryValue::ExpandString(bytes_to_os_string(bs)),
+            REG_EXPAND_SZ => os_string_to_expand_value(bytes_to_os_string(bs)),
             REG_BINARY => RegistryValue::Binary(Vec::from(bs)),
             REG_DWORD => RegistryValue::Dword(u32::from_le_bytes(bs.try_into().expect("DWORD value has incorrect length"))),
             REG_DWORD_BIG_ENDIAN => RegistryValue::DwordBigEndian(u32::from_be_bytes(bs.try_into().expect("DWORD value has incorrect length"))),
@@ -322,4 +323,47 @@ fn bytes_to_multi_os_string(bs: &[u8]) -> Vec<OsString> {
     }
 
     ss
+}
+
+fn os_string_to_expand_value(os_string: OsString) -> RegistryValue {
+    if os_string.len() == 0 {
+        let unexpanded = os_string.clone();
+        let expanded = os_string;
+        return RegistryValue::ExpandString {
+            unexpanded,
+            expanded,
+        };
+    }
+
+    // check length
+    let os_string_ws = WideString::from(&os_string);
+    let mut empty_buf = [];
+    let new_length = unsafe {
+        ExpandEnvironmentStringsW(
+            os_string_ws.as_pcwstr(),
+            &mut empty_buf,
+        )
+    };
+    if new_length == 0 {
+        panic!("failed to get expanded environment string length: {}", Error::from_win32());
+    }
+    let new_length_usize: usize = new_length.try_into().unwrap();
+
+    let mut buf = vec![0u16; new_length_usize];
+    let expanded_length = unsafe {
+        ExpandEnvironmentStringsW(
+            os_string_ws.as_pcwstr(),
+            buf.as_mut_slice(),
+        )
+    };
+    if expanded_length == 0 {
+        panic!("failed to get expanded environment string: {}", Error::from_win32());
+    }
+    let expanded_length_usize: usize = expanded_length.try_into().unwrap();
+
+    let expanded = OsString::from_wide(&buf[0..expanded_length_usize]);
+    RegistryValue::ExpandString {
+        unexpanded: os_string,
+        expanded,
+    }
 }
